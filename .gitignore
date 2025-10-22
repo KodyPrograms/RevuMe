@@ -1,1 +1,5 @@
 backend/__pycache__/
+.venv/
+backend/.venv/
+backend/revume.db
+revume.db
