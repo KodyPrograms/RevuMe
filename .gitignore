@@ -3,3 +3,4 @@ backend/__pycache__/
 backend/.venv/
 backend/revume.db
 revume.db
+backend/.env

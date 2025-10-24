@@ -11,6 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text, create_engine, text
 from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
+from dotenv import load_dotenv
+from pathlib import Path
 
 
 def parse_origins(raw: str) -> List[str]:
@@ -21,6 +23,8 @@ def parse_origins(raw: str) -> List[str]:
             out.append(clean)
     return out
 
+
+load_dotenv(dotenv_path=Path(__file__).resolve().with_name(".env"), override=True)
 
 DEFAULT_ORIGINS = "https://revumeapp.netlify.app,http://localhost:5173"
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN") or os.getenv("FRONTEND_ORIGINS")
