@@ -69,3 +69,12 @@ export const updateReview = (id, payload) =>
   http(`/api/reviews/${id}`, { method: "PUT", body: JSON.stringify(payload) });
 export const deleteReview = id =>
   http(`/api/reviews/${id}`, { method: "DELETE" });
+
+export async function checkApiReady() {
+  try {
+    const res = await fetch(`${BASE}/health`, { cache: "no-store" });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}

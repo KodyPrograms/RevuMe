@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   listReviews,
   createReview,
@@ -9,12 +9,29 @@ import {
   logoutUser,
   setAuthToken,
   getAuthToken,
+  checkApiReady,
 } from "./api";
 
 const TYPES = ["place", "food", "movie", "book", "product"];
 const nowISO = () => new Date().toISOString();
 const USER_STORAGE_KEY = "revume_user";
 const THEME_STORAGE_KEY = "revume_theme";
+const STARTUP_ERROR_CODES = ["502", "503", "504", "522", "524"];
+
+function isLikelyBootingError(error) {
+  if (!error) return false;
+  const message = String(error?.message ?? error ?? "").toLowerCase();
+  if (!message) return false;
+  if (error?.name === "TypeError") return true;
+  if (
+    message.includes("failed to fetch") ||
+    message.includes("network") ||
+    message.includes("timeout")
+  ) {
+    return true;
+  }
+  return STARTUP_ERROR_CODES.some(code => message.includes(`http ${code}`));
+}
 
 function getInitialTheme() {
   if (typeof window === "undefined") {
@@ -75,6 +92,7 @@ export default function App() {
   const [sortBy, setSortBy] = useState("updated");
   const [activeCat, setActiveCat] = useState("");
   const [editing, setEditing] = useState(null);
+  const [viewing, setViewing] = useState(null);
   const [token, setTokenState] = useState(() => getAuthToken());
   const [user, setUser] = useState(() => loadStoredUser());
   const [authMode, setAuthMode] = useState("login");
@@ -82,6 +100,9 @@ export default function App() {
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [theme, setTheme] = useState(() => getInitialTheme());
+  const [apiStatus, setApiStatus] = useState("idle");
+  const apiCheckInFlight = useRef(false);
+  const refreshRetryRef = useRef(null);
 
   const applyAuth = useCallback(result => {
     if (result && result.token && result.user) {
@@ -89,6 +110,7 @@ export default function App() {
       setTokenState(result.token);
       setUser(result.user);
       storeUser(result.user);
+      setApiStatus("ready");
     } else {
       setAuthToken("");
       setTokenState("");
@@ -100,6 +122,8 @@ export default function App() {
       setType("");
       setSortBy("updated");
       setActiveCat("");
+      setViewing(null);
+      setApiStatus("idle");
     }
   }, []);
 
@@ -116,35 +140,121 @@ export default function App() {
     }
   }, [theme]);
 
+  useEffect(() => () => {
+    if (refreshRetryRef.current) {
+      clearTimeout(refreshRetryRef.current);
+    }
+  }, []);
+
+  const waitForApi = useCallback(async () => {
+    if (apiCheckInFlight.current) {
+      return false;
+    }
+    apiCheckInFlight.current = true;
+    setApiStatus(status => (status === "booting" ? status : "booting"));
+    try {
+      const attempts = 12;
+      for (let attempt = 0; attempt < attempts; attempt++) {
+        const ready = await checkApiReady();
+        if (ready) {
+          setApiStatus("ready");
+          return true;
+        }
+        await new Promise(resolve => setTimeout(resolve, attempt < 3 ? 1000 : 1500));
+      }
+      setApiStatus("error");
+      return false;
+    } finally {
+      apiCheckInFlight.current = false;
+    }
+  }, []);
+
   const toggleTheme = useCallback(() => {
     setTheme(curr => (curr === "dark" ? "light" : "dark"));
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const ready = await checkApiReady();
+      if (cancelled) return;
+      if (!ready) {
+        await waitForApi();
+      } else {
+        setApiStatus("ready");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [waitForApi]);
+
   const refresh = useCallback(async () => {
     if (!token) {
       setRows([]);
+      setViewing(null);
+      setApiStatus("idle");
       return;
     }
     try {
       const data = await listReviews();
       setRows(Array.isArray(data) ? data : []);
+      setApiStatus("ready");
     } catch (err) {
       const message = String(err?.message ?? "");
       if (message.includes("401")) {
         applyAuth(null);
       } else {
-        console.error(err);
+        if (isLikelyBootingError(err)) {
+          const warmed = await waitForApi();
+          if (warmed && token) {
+            if (refreshRetryRef.current) {
+              clearTimeout(refreshRetryRef.current);
+            }
+            refreshRetryRef.current = setTimeout(() => {
+              refreshRetryRef.current = null;
+              refresh();
+            }, 300);
+          }
+        } else {
+          setApiStatus("error");
+          console.error(err);
+        }
       }
     }
-  }, [token, applyAuth]);
+  }, [token, applyAuth, waitForApi]);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  useEffect(() => {
+    if (!viewing) return;
+    const next = rows.find(r => r.id === viewing.id);
+    if (next && next !== viewing) {
+      setViewing(next);
+    }
+    if (!next) {
+      setViewing(null);
+    }
+  }, [rows, viewing]);
 
   const authenticated = Boolean(token);
   const themeIsDark = theme === "dark";
   const themeIcon = themeIsDark ? "bi-sun" : "bi-moon";
   const themeLabel = themeIsDark ? "Switch to light mode" : "Switch to dark mode";
   const setAuthField = key => e => setAuthForm(s => ({ ...s, [key]: e.target.value }));
+  const showApiBanner = apiStatus === "booting" || apiStatus === "error";
+  const apiBanner = showApiBanner ? (
+    <div className="container mt-3">
+      <div className={`api-status-banner ${apiStatus}`}>
+        <i className={`bi ${apiStatus === "booting" ? "bi-hourglass-split" : "bi-exclamation-triangle"} me-2`}></i>
+        <span>
+          {apiStatus === "booting"
+            ? "Hang tight! The RevuMe API is waking up. Cold starts can take about 20 to 40 seconds."
+            : "We cannot reach the RevuMe API right now. Please retry in a few seconds."}
+        </span>
+      </div>
+    </div>
+  ) : null;
 
   async function handleAuthSubmit(e) {
     e.preventDefault();
@@ -178,7 +288,12 @@ export default function App() {
         }
       }
       const cleaned = detail || message.replace(/^HTTP\s+\d+\s+[A-Za-z ]+\s+-\s*/i, "").trim();
-      setAuthError(cleaned || "Unable to process request.");
+      if (isLikelyBootingError(err)) {
+        setAuthError("Warming up the RevuMe servers... this can take up to a minute if they've been idle.");
+        waitForApi();
+      } else {
+        setAuthError(cleaned || "Unable to process request.");
+      }
     } finally {
       setAuthBusy(false);
     }
@@ -193,6 +308,28 @@ export default function App() {
       applyAuth(null);
     }
   }
+
+  const handleDelete = useCallback(async review => {
+    if (!review?.id) return;
+    // Confirm with the user before deleting, matching previous behavior.
+    if (!confirm("Delete this review?")) return;
+    try {
+      await deleteReview(review.id);
+      setViewing(curr => (curr?.id === review.id ? null : curr));
+      refresh();
+    } catch (err) {
+      const msg = String(err?.message ?? "");
+      if (msg.includes("401")) {
+        alert("Your session expired. Please sign in again.");
+        applyAuth(null);
+      } else if (isLikelyBootingError(err)) {
+        waitForApi();
+        alert("Warming up the RevuMe API. Please try again in a few seconds.");
+      } else {
+        alert(msg);
+      }
+    }
+  }, [refresh, applyAuth, waitForApi]);
 
   const categories = useMemo(() => {
     const s = new Set();
@@ -263,6 +400,8 @@ export default function App() {
             </div>
           </div>
         </nav>
+
+        {apiBanner}
 
         <main className="container py-5">
           <div className="row justify-content-center">
@@ -357,6 +496,8 @@ export default function App() {
         </div>
       </nav>
 
+      {apiBanner}
+
       {/* Filters */}
       <div className="filter-bar border-bottom py-2">
         <div className="container">
@@ -444,97 +585,85 @@ export default function App() {
             </button>
           </div>
         ) : (
-          <div className="row">
+          <div className="row g-3">
             {filtered.map(r => (
-              <div key={r.id} className="col-12">
-                <div className="card mb-3 p-2">
-                  <div className="row g-2 align-items-stretch">
-                    <div className="col-12 col-sm-4">
-                      <img
-                        className="photo"
-                        alt="photo"
-                        src={
-                          r.photoDataUrl ||
-                          `https://picsum.photos/seed/${encodeURIComponent(r.title || r.id)}/600/400`
-                        }
-                      />
+              <div key={r.id} className="col-12 col-sm-6 col-lg-4 col-xl-3">
+                <div className="review-card card h-100">
+                  <div className="review-card-stars">
+                    <Stars value={r.rating} />
+                  </div>
+                  <div className="review-card-photo-wrap">
+                    <img
+                      className="review-card-photo"
+                      alt={r.title || "review photo"}
+                      src={
+                        r.photoDataUrl ||
+                        `https://picsum.photos/seed/${encodeURIComponent(r.title || r.id)}/600/400`
+                      }
+                    />
+                  </div>
+                  <div className="card-body">
+                    <div className="review-card-header d-flex align-items-center gap-2 flex-wrap">
+                      <span className="tag-pill text-uppercase small">{r.type}</span>
+                      <span className="chip">{r.category || "Uncategorized"}</span>
                     </div>
-                    <div className="col-12 col-sm-8">
-                      <div className="card-body py-2">
-                        <div className="d-flex align-items-center justify-content-between">
-                          <div className="d-flex align-items-center gap-2">
-                            <span className="tag-pill text-uppercase small">{r.type}</span>
-                            <span className="chip">{r.category || "Uncategorized"}</span>
-                          </div>
-                          <Stars value={r.rating} />
-                        </div>
-                        <h5 className="card-title mt-2 mb-1 title">{r.title}</h5>
-                        <p className="mb-2 small text-secondary">{r.address}</p>
-                        <p className="card-text notes">{r.notes}</p>
-                        <div className="action-buttons">
-                          {r.address && (
-                            <a
-                              className="btn btn-ghost btn-sm"
-                              target="_blank"
-                              rel="noreferrer"
-                              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                                r.address
-                              )}`}
-                              aria-label="Open location in Google Maps"
-                            >
-                              <i className="bi bi-geo-alt"></i>
-                              <span className="d-none d-sm-inline ms-1">Maps</span>
-                            </a>
-                          )}
-                          {r.website && (
-                            <a
-                              className="btn btn-ghost btn-sm"
-                              target="_blank"
-                              rel="noreferrer"
-                              href={r.website}
-                              aria-label="Open related website"
-                            >
-                              <i className="bi bi-link-45deg"></i>
-                              <span className="d-none d-sm-inline ms-1">Website</span>
-                            </a>
-                          )}
-                          <button
-                            className="btn btn-ghost btn-sm"
-                            onClick={() => setEditing(r)}
-                            aria-label="Edit review"
-                          >
-                            <i className="bi bi-pencil"></i>
-                            <span className="d-none d-sm-inline ms-1">Edit</span>
-                          </button>
-                          <button
-                            className="btn btn-ghost btn-sm text-danger"
-                            onClick={async () => {
-                              if (confirm("Delete this review?")) {
-                                try {
-                                  await deleteReview(r.id);
-                                  refresh();
-                                } catch (err) {
-                                  const msg = String(err?.message ?? "");
-                                  if (msg.includes("401")) {
-                                    alert("Your session expired. Please sign in again.");
-                                    applyAuth(null);
-                                  } else {
-                                    alert(msg);
-                                  }
-                                }
-                              }
-                            }}
-                            aria-label="Delete review"
-                          >
-                            <i className="bi bi-trash"></i>
-                            <span className="d-none d-sm-inline ms-1">Delete</span>
-                          </button>
-                        </div>
-                        <p className="mt-2 text-secondary small">
-                          Updated {new Date(r.updated || r.created || Date.now()).toLocaleString()}
-                        </p>
-                      </div>
+                    <h5 className="card-title mb-1 title">{r.title}</h5>
+                    {r.address && <p className="mb-2 small text-secondary">{r.address}</p>}
+                    <div className="review-card-actions">
+                      <button
+                        className="btn btn-accent btn-sm"
+                        onClick={() => setViewing(r)}
+                        aria-label="View review details"
+                      >
+                        <i className="bi bi-eye"></i>
+                        <span className="d-none d-md-inline ms-1">View</span>
+                      </button>
+                      {r.address && (
+                        <a
+                          className="btn btn-ghost btn-sm"
+                          target="_blank"
+                          rel="noreferrer"
+                          href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                            r.address
+                          )}`}
+                          aria-label="Open location in Google Maps"
+                        >
+                          <i className="bi bi-geo-alt"></i>
+                          <span className="d-none d-md-inline ms-1">Maps</span>
+                        </a>
+                      )}
+                      {r.website && (
+                        <a
+                          className="btn btn-ghost btn-sm"
+                          target="_blank"
+                          rel="noreferrer"
+                          href={r.website}
+                          aria-label="Open related website"
+                        >
+                          <i className="bi bi-link-45deg"></i>
+                          <span className="d-none d-md-inline ms-1">Website</span>
+                        </a>
+                      )}
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        onClick={() => setEditing(r)}
+                        aria-label="Edit review"
+                      >
+                        <i className="bi bi-pencil"></i>
+                        <span className="d-none d-md-inline ms-1">Edit</span>
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-sm text-danger"
+                        onClick={() => handleDelete(r)}
+                        aria-label="Delete review"
+                      >
+                        <i className="bi bi-trash"></i>
+                        <span className="d-none d-md-inline ms-1">Delete</span>
+                      </button>
                     </div>
+                  </div>
+                  <div className="review-card-meta text-secondary small">
+                    Updated {new Date(r.updated || r.created || Date.now()).toLocaleString()}
                   </div>
                 </div>
               </div>
@@ -542,6 +671,18 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {viewing && (
+        <ReviewDetail
+          review={viewing}
+          onClose={() => setViewing(null)}
+          onEdit={() => {
+            setEditing(viewing);
+            setViewing(null);
+          }}
+          onDelete={() => handleDelete(viewing)}
+        />
+      )}
 
       {editing !== null && (
         <Editor
@@ -554,6 +695,61 @@ export default function App() {
           onAuthError={() => applyAuth(null)}
         />
       )}
+    </div>
+  );
+}
+
+function ReviewDetail({ review, onClose, onEdit, onDelete }) {
+  if (!review) return null;
+  const updatedStamp = review.updated || review.created || Date.now();
+  const updatedText = new Date(updatedStamp).toLocaleString();
+  return (
+    <div className="review-detail-backdrop" role="dialog" aria-modal="true">
+      <div className="review-detail-card">
+        <div className="d-flex justify-content-between align-items-start flex-wrap gap-2">
+          <div>
+            <div className="d-flex align-items-center gap-2 mb-2">
+              <span className="tag-pill text-uppercase small">{review.type}</span>
+              <span className="chip">{review.category || "Uncategorized"}</span>
+            </div>
+            <h2 className="mb-1 title">{review.title}</h2>
+            <div className="d-flex align-items-center gap-2 text-secondary small">
+              <Stars value={review.rating} />
+              <span>{updatedText}</span>
+            </div>
+          </div>
+          <div className="d-flex gap-2 flex-wrap">
+            <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}>
+              <i className="bi bi-x-lg me-1"></i>Close
+            </button>
+            <button type="button" className="btn btn-accent btn-sm" onClick={onEdit}>
+              <i className="bi bi-pencil-square me-1"></i>Edit
+            </button>
+            <button type="button" className="btn btn-ghost btn-sm text-danger" onClick={onDelete}>
+              <i className="bi bi-trash3 me-1"></i>Delete
+            </button>
+          </div>
+        </div>
+        <img
+          className="review-detail-photo"
+          alt={review.title || "review photo"}
+          src={
+            review.photoDataUrl ||
+            `https://picsum.photos/seed/${encodeURIComponent(review.title || review.id)}/800/500`
+          }
+        />
+        {review.address && <p className="mt-3 mb-1 text-secondary">{review.address}</p>}
+        {review.website && (
+          <p className="mb-3">
+            <a className="btn btn-ghost btn-sm" href={review.website} target="_blank" rel="noreferrer">
+              <i className="bi bi-link-45deg me-1"></i>Website
+            </a>
+          </p>
+        )}
+        <div className="review-detail-notes">
+          {review.notes ? review.notes : <span className="text-secondary">No description provided.</span>}
+        </div>
+      </div>
     </div>
   );
 }

@@ -181,12 +181,80 @@ textarea::placeholder {
   letter-spacing: 0.02em;
 }
 
-.photo {
+.review-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.review-card-photo-wrap {
+  padding: 1rem 1rem 0;
+}
+
+.review-card-photo {
   object-fit: cover;
   width: 100%;
-  height: 200px;
-  border-radius: 0.75rem;
+  aspect-ratio: 4 / 3;
+  border-radius: 0.9rem;
   border: 1px solid var(--border);
+}
+
+.review-card .card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.25rem;
+}
+
+.review-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.review-card-stars {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.75rem;
+  background: rgba(17, 24, 39, 0.55);
+  border-radius: 999px;
+  padding: 0.3rem 0.65rem;
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
+body[data-theme="light"] .review-card-stars,
+body:not([data-theme]) .review-card-stars {
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.review-card-stars .rating {
+  font-size: 1.1rem;
+  display: flex;
+  gap: 0.2rem;
+  color: #fbbf24;
+}
+
+.review-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.review-card-actions .btn {
+  flex: 1 1 calc(50% - 0.5rem);
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+
+.review-card-meta {
+  margin-top: auto;
+  padding: 0 1.25rem 1.25rem;
 }
 
 .empty-state {
@@ -203,11 +271,44 @@ textarea::placeholder {
   color: var(--muted) !important;
 }
 
-.action-buttons {
+.review-detail-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
   align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  z-index: 1200;
+  backdrop-filter: blur(6px);
+}
+
+.review-detail-card {
+  width: min(960px, 100%);
+  max-height: calc(100vh - 3rem);
+  overflow-y: auto;
+  background: var(--card);
+  color: var(--ink);
+  border-radius: 1.5rem;
+  padding: 2rem;
+  box-shadow: 0 28px 50px rgba(15, 23, 42, 0.2);
+  border: 1px solid var(--border);
+}
+
+.review-detail-photo {
+  width: 100%;
+  max-height: 360px;
+  object-fit: cover;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  margin-top: 1rem;
+}
+
+.review-detail-notes {
+  margin-top: 1.5rem;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  color: var(--ink);
 }
 
 .auth-screen {
@@ -246,30 +347,205 @@ textarea::placeholder {
   filter: var(--close-filter);
 }
 
+.editor-offcanvas-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1.5rem 1.5rem 1rem;
+}
+
+.editor-offcanvas-body {
+  padding: 0 1.5rem 1.5rem;
+  overflow-y: auto;
+}
+
+.editor-stepper {
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.editor-step {
+  flex: 1 1 0;
+  padding: 0.75rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: var(--card-alt);
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  transition: border 0.2s ease, background 0.2s ease, color 0.2s ease;
+}
+
+.editor-step .step-index {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--border);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.editor-step.active {
+  border-color: var(--accent);
+  background: rgba(37, 99, 235, 0.12);
+  color: var(--ink);
+}
+
+.editor-step.active .step-index {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.editor-step.complete {
+  border-color: var(--accent-2);
+  background: rgba(22, 163, 74, 0.12);
+  color: var(--ink);
+}
+
+.editor-step.complete .step-index {
+  background: var(--accent-2);
+  color: #ffffff;
+}
+
+.editor-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.editor-form .form-control-lg,
+.editor-form .form-select-lg {
+  border-radius: 1rem;
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+}
+
+.photo-input {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.photo-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.photo-preview img {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 0.75rem;
+  border: 1px solid var(--border);
+}
+
+.editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.editor-actions .btn {
+  flex: 1 1 180px;
+}
+
+.api-status-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: var(--shadow);
+  font-size: 0.95rem;
+}
+
+.api-status-banner.booting {
+  border-color: var(--accent);
+  background: rgba(37, 99, 235, 0.12);
+}
+
+.api-status-banner.error {
+  border-color: var(--danger-hover-bg);
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+.api-status-banner i {
+  font-size: 1.1rem;
+}
+
 .text-secondary,
 .text-muted {
   color: var(--muted) !important;
 }
 
 @media (max-width: 767.98px) {
-  .photo {
-    height: 160px;
+  .review-card-photo {
+    aspect-ratio: 5 / 4;
   }
 }
 
 @media (max-width: 575.98px) {
+  .editor-offcanvas-header {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 1.25rem 1.25rem 1rem;
+  }
+  .editor-offcanvas-body {
+    padding: 0 1.25rem 1.5rem;
+  }
+  .editor-stepper {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .editor-actions .btn {
+    flex: 1 1 100%;
+  }
+  .api-status-banner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .review-card {
+    padding: 0;
+  }
+  .review-card-photo-wrap {
+    padding: 0.75rem 0.75rem 0;
+  }
+  .review-card .card-body {
+    padding: 1rem;
+  }
   .card {
     padding: 0.75rem;
   }
-  .action-buttons {
+  .review-card-actions {
     flex-wrap: nowrap;
     justify-content: space-between;
+    gap: 0.35rem;
   }
-  .action-buttons .btn {
-    flex: 1 1 auto;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.45rem;
+  .review-card-actions .btn {
+    flex: 0 1 auto;
+    width: 42px;
+    height: 42px;
+    padding: 0.35rem;
+  }
+  .review-card-actions .btn span {
+    display: none;
+  }
+  .review-detail-card {
+    padding: 1.25rem;
+    max-height: calc(100vh - 2rem);
+  }
+  .review-detail-photo {
+    max-height: 240px;
   }
 }
