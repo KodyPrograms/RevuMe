@@ -17,6 +17,11 @@ const nowISO = () => new Date().toISOString();
 const USER_STORAGE_KEY = "revume_user";
 const THEME_STORAGE_KEY = "revume_theme";
 const STARTUP_ERROR_CODES = ["502", "503", "504", "522", "524"];
+const DEMO_EMAIL = "example@example.com";
+const DEMO_PASSWORD = "example";
+const DEMO_AUTH_FORM = { email: DEMO_EMAIL, password: DEMO_PASSWORD };
+const DEMO_UPLOAD_REASON =
+  "Image uploads are disabled on the demo account for safety, so shared demo access cannot be used to store or surface unsafe content.";
 
 function isLikelyBootingError(error) {
   if (!error) return false;
@@ -96,7 +101,7 @@ export default function App() {
   const [token, setTokenState] = useState(() => getAuthToken());
   const [user, setUser] = useState(() => loadStoredUser());
   const [authMode, setAuthMode] = useState("login");
-  const [authForm, setAuthForm] = useState({ email: "", password: "" });
+  const [authForm, setAuthForm] = useState(DEMO_AUTH_FORM);
   const [authError, setAuthError] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [theme, setTheme] = useState(() => getInitialTheme());
@@ -242,6 +247,14 @@ export default function App() {
   const themeIcon = themeIsDark ? "bi-sun" : "bi-moon";
   const themeLabel = themeIsDark ? "Switch to light mode" : "Switch to dark mode";
   const setAuthField = key => e => setAuthForm(s => ({ ...s, [key]: e.target.value }));
+  const toggleAuthMode = () => {
+    setAuthMode(mode => {
+      const nextMode = mode === "login" ? "register" : "login";
+      setAuthForm(nextMode === "login" ? DEMO_AUTH_FORM : { email: "", password: "" });
+      return nextMode;
+    });
+    setAuthError("");
+  };
   const showApiBanner = apiStatus === "booting" || apiStatus === "error";
   const apiBanner = showApiBanner ? (
     <div className="container mt-3">
@@ -272,7 +285,7 @@ export default function App() {
       const action = authMode === "login" ? loginUser : registerUser;
       const response = await action(payload);
       applyAuth(response);
-      setAuthForm({ email: "", password: "" });
+      setAuthForm(authMode === "login" ? DEMO_AUTH_FORM : { email: "", password: "" });
     } catch (err) {
       const message = String(err?.message ?? "");
       let detail = "";
@@ -305,6 +318,9 @@ export default function App() {
     } catch (err) {
       console.warn("Logout failed", err);
     } finally {
+      setAuthForm(DEMO_AUTH_FORM);
+      setAuthMode("login");
+      setAuthError("");
       applyAuth(null);
     }
   }
@@ -390,10 +406,7 @@ export default function App() {
               <button
                 type="button"
                 className="btn btn-link auth-switch text-decoration-none"
-                onClick={() => {
-                  setAuthMode(m => (m === "login" ? "register" : "login"));
-                  setAuthError("");
-                }}
+                onClick={toggleAuthMode}
               >
                 {authMode === "login" ? "Need an account? Sign up" : "Have an account? Sign in"}
               </button>
@@ -415,6 +428,12 @@ export default function App() {
                     ? "Sign in to access the reviews you have saved for yourself."
                     : "Register to keep private reviews for places, food, movies, books, and more."}
                 </p>
+                {authMode === "login" && (
+                  <div className="alert alert-warning py-2 small" role="status">
+                    Use the demo login: <strong>{DEMO_EMAIL}</strong> / <strong>{DEMO_PASSWORD}</strong>.
+                    Demo users cannot upload images because shared public access is restricted from storing images for safety concerns.
+                  </div>
+                )}
                 {authError && (
                   <div className="alert alert-danger py-2">{authError}</div>
                 )}
@@ -427,7 +446,7 @@ export default function App() {
                       autoComplete="email"
                       value={authForm.email}
                       onChange={setAuthField("email")}
-                      placeholder="you@example.com"
+                      placeholder={DEMO_EMAIL}
                     />
                   </div>
                   <div>
@@ -449,10 +468,7 @@ export default function App() {
                   <button
                     type="button"
                     className="btn btn-link text-decoration-none auth-switch small"
-                    onClick={() => {
-                      setAuthMode(m => (m === "login" ? "register" : "login"));
-                      setAuthError("");
-                    }}
+                    onClick={toggleAuthMode}
                   >
                     {authMode === "login" ? "Create an account" : "Already have an account? Sign in"}
                   </button>
@@ -755,6 +771,8 @@ function ReviewDetail({ review, onClose, onEdit, onDelete }) {
 }
 
 function Editor({ initial, onClose, onSaved, onAuthError = () => {} }) {
+  const storedUser = loadStoredUser();
+  const isDemoUser = storedUser?.email?.toLowerCase?.() === DEMO_EMAIL;
   const [form, setForm] = useState({
     id: initial.id,
     title: initial.title || "",
@@ -770,6 +788,11 @@ function Editor({ initial, onClose, onSaved, onAuthError = () => {} }) {
 
   const setField = k => e => setForm(s => ({ ...s, [k]: e.target.value }));
   function onFile(e) {
+    if (isDemoUser) {
+      alert(DEMO_UPLOAD_REASON);
+      e.target.value = "";
+      return;
+    }
     const f = e.target.files[0];
     if (!f) return;
     const r = new FileReader();
@@ -856,7 +879,16 @@ function Editor({ initial, onClose, onSaved, onAuthError = () => {} }) {
             </div>
             <div className="col-12">
               <label className="form-label small">Photo (optional)</label>
-              <input type="file" accept="image/*" className="form-control" onChange={onFile} />
+              <input
+                type="file"
+                accept="image/*"
+                className="form-control"
+                onChange={onFile}
+                disabled={isDemoUser}
+              />
+              {isDemoUser && (
+                <div className="form-text text-warning">{DEMO_UPLOAD_REASON}</div>
+              )}
             </div>
           </div>
           <div className="d-flex gap-2 mt-3">

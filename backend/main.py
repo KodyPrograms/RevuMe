@@ -29,6 +29,12 @@ load_dotenv(dotenv_path=Path(__file__).resolve().with_name(".env"), override=Tru
 DEFAULT_ORIGINS = "https://revumeapp.netlify.app,http://localhost:5173"
 FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN") or os.getenv("FRONTEND_ORIGINS")
 ALLOWED_ORIGINS = parse_origins(FRONTEND_ORIGIN or DEFAULT_ORIGINS) or parse_origins(DEFAULT_ORIGINS)
+DEMO_EMAIL = "example@example.com"
+DEMO_PASSWORD = "example"
+DEMO_UPLOAD_ERROR = (
+    "Image uploads are disabled on the demo account for safety concerns because shared public access "
+    "cannot be allowed to store user-supplied images."
+)
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./revume.db")
 ENGINE_KWARGS = {"connect_args": {"check_same_thread": False}} if DATABASE_URL.startswith("sqlite") else {}
@@ -116,6 +122,21 @@ def issue_token(db: Session, user: User) -> str:
     return token_value
 
 
+def ensure_demo_user() -> None:
+    db = SessionLocal()
+    try:
+        existing = db.query(User).filter(User.email == DEMO_EMAIL).first()
+        if existing:
+            return
+        db.add(User(email=DEMO_EMAIL, password_hash=hash_password(DEMO_PASSWORD)))
+        db.commit()
+    finally:
+        db.close()
+
+
+ensure_demo_user()
+
+
 class UserOut(BaseModel):
     id: str
     email: str
@@ -189,6 +210,13 @@ def apply_review_fields(review: Review, data: Dict[str, object]) -> None:
             except (TypeError, ValueError):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Rating must be a number")
         setattr(review, key, value)
+
+
+def reject_demo_image_upload(user: User, data: Dict[str, object]) -> None:
+    if user.email != DEMO_EMAIL:
+        return
+    if data.get("photoDataUrl"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=DEMO_UPLOAD_ERROR)
 
 
 def serialize_review(review: Review) -> Dict[str, object]:
@@ -285,6 +313,7 @@ def create_review(
     db: Session = Depends(get_db),
 ):
     data = payload.model_dump(exclude_unset=True)
+    reject_demo_image_upload(user, data)
     if not data.get("title"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Title is required")
     review = Review(id=(data.get("id") or uuid4().hex), user_id=user.id, title="temp")
@@ -306,6 +335,7 @@ def update_review(
     if not review:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found")
     data = payload.model_dump(exclude_unset=True)
+    reject_demo_image_upload(user, data)
     apply_review_fields(review, data)
     db.commit()
     db.refresh(review)
